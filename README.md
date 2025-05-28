@@ -145,14 +145,3 @@ The model tuning process is documented in `tuning-documentation.md`, which inclu
 - Detailed results and analysis
 - Performance comparisons
 
-## Contributing
-
-To contribute to the project:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## License
-
-[Add your license information here] 
