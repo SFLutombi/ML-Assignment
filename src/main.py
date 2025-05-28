@@ -11,7 +11,10 @@ import pandas as pd
 import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix, f1_score, accuracy_score
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import LeaveOneGroupOut
+from sklearn.model_selection import LeaveOneGroupOut, cross_val_score
+import argparse
+from skopt import BayesSearchCV
+from skopt.space import Real, Integer, Categorical
 
 def setup_plotting_style():
     """Set up matplotlib style for better visualizations."""
@@ -67,15 +70,55 @@ def save_results_to_file(results_dict, save_path):
             f.write(f"{metric}:\n")
             f.write(f"{value}\n\n")
 
+def get_model(model_type='rf', **kwargs):
+    """Return a classifier based on type and kwargs."""
+    if model_type == 'rf':
+        if kwargs.get('results_subdir') == 'bayesian_opt':
+            # Define the search space for Bayesian Optimization
+            search_space = {
+                'n_estimators': Integer(50, 500),
+                'max_depth': Integer(5, 50),
+                'min_samples_split': Integer(2, 20),
+                'min_samples_leaf': Integer(1, 10),
+                'max_features': Categorical(['sqrt', 'log2'])
+            }
+            
+            # Create base estimator
+            base_rf = RandomForestClassifier(random_state=42)
+            
+            # Create BayesSearchCV object
+            optimizer = BayesSearchCV(
+                base_rf,
+                search_space,
+                n_iter=50,  # Number of optimization iterations
+                cv=5,       # 5-fold CV for optimization
+                n_jobs=-1,  # Use all available cores
+                random_state=42
+            )
+            return optimizer
+        else:
+            # Base model with default parameters
+            return RandomForestClassifier(
+                n_estimators=100,
+                random_state=42,
+                max_features='sqrt'
+            )
+    # Add more models here as needed
+    raise ValueError(f"Unknown model_type: {model_type}")
+
 def main():
+    parser = argparse.ArgumentParser(description='HAR Model Training and Evaluation')
+    parser.add_argument('--results_subdir', type=str, default='base', help='Subfolder for results (e.g., base, bayesian_opt)')
+    args = parser.parse_args()
+
     try:
         # Set up paths
         current_dir = Path(os.path.dirname(os.path.abspath(__file__)))
         data_dir = current_dir.parent / 'motion-sense' / 'data'
-        output_dir = current_dir.parent / 'results'
-        output_dir.mkdir(exist_ok=True)
+        output_dir = current_dir.parent / 'results' / args.results_subdir
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        print("\n=== Human Activity Recognition Model Training ===\n")
+        print(f"\n=== Human Activity Recognition Model Training ({args.results_subdir}) ===\n")
 
         print("1. Loading and preprocessing data...")
         # Load and preprocess data
@@ -103,7 +146,7 @@ def main():
         print("\n3. Training and evaluating model...")
         # Train and evaluate model
         logo = LeaveOneGroupOut()
-        clf = RandomForestClassifier(n_estimators=100, random_state=42)
+        clf = get_model('rf', results_subdir=args.results_subdir)
         
         # Initialize metrics storage
         accuracies = []
@@ -117,8 +160,18 @@ def main():
             y_train, y_test = y[train_idx], y[test_idx]
             
             # Train and predict
-            clf.fit(X_train, y_train)
-            y_pred = clf.predict(X_test)
+            if args.results_subdir == 'bayesian_opt':
+                # For Bayesian Optimization, we first find the best parameters
+                clf.fit(X_train, y_train)
+                print("\nBest parameters found:")
+                for param, value in clf.best_params_.items():
+                    print(f"{param}: {value}")
+                # Use the best estimator for prediction
+                y_pred = clf.best_estimator_.predict(X_test)
+            else:
+                # Regular training for base model
+                clf.fit(X_train, y_train)
+                y_pred = clf.predict(X_test)
             
             # Store metrics
             accuracies.append(accuracy_score(y_test, y_pred))
@@ -159,6 +212,12 @@ def main():
             'Individual Fold F1-Scores': f1_scores,
             'Classification Report': class_report
         }
+        
+        # Add best parameters to results if using Bayesian Optimization
+        if args.results_subdir == 'bayesian_opt':
+            results_dict['Best Parameters'] = clf.best_params_
+            results_dict['Optimization History'] = str(clf.optimizer_results_[0])
+            
         save_results_to_file(results_dict, output_dir)
 
         print(f"\nDone! Results have been saved to: {output_dir}")

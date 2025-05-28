@@ -1,131 +1,142 @@
 # Human Activity Recognition (HAR) using MotionSense Dataset
 
-This project implements a machine learning classifier for human activity recognition using the MotionSense dataset. The model uses both accelerometer and gyroscope data to classify six different activities: walking downstairs, walking upstairs, sitting, standing, walking, and jogging.
-
-## Features
-
-- Data preprocessing and normalization
-- Feature extraction (statistical and spectral features)
-- Random Forest classifier
-- Leave-One-Subject-Out Cross-Validation (LOSO-CV)
-- Performance visualization (confusion matrix and feature importance)
-
-## Technical Implementation Details
-
-### Data Preprocessing
-1. **Data Loading**
-   - Loads accelerometer and gyroscope data from separate ZIP files
-   - Merges sensor data based on timestamp and subject ID
-   - Handles data from multiple subjects and activities
-
-2. **Normalization**
-   - Applies z-score normalization (μ=0, σ=1) per subject
-   - Normalizes each sensor axis independently
-   - Formula: `(x - μ)/σ` where μ and σ are calculated per subject
-   - This helps account for individual differences in sensor readings
-
-### Feature Extraction
-1. **Windowing**
-   - Window size: 100 samples (2 seconds of data)
-   - Stride: 50 samples (50% overlap between windows)
-   - Each window becomes one training instance
-
-2. **Statistical Features** (computed for each axis: x, y, z of both sensors)
-   - Mean
-   - Standard deviation
-   - Minimum value
-   - Maximum value
-   - Root Mean Square (RMS)
-   - Energy (sum of squares)
-   - Signal Magnitude Area (SMA)
-
-3. **Spectral Features**
-   - FFT peak magnitude
-   - FFT dominant frequency bin
-   - Helps capture periodic patterns in activities
-
-### Model Architecture
-- **Classifier**: Random Forest
-  - Number of trees: 100
-  - Max depth: None (trees grow until leaves are pure)
-  - Uses all CPU cores for parallel training
-  - Provides feature importance rankings
-
-### Validation Strategy
-1. **Leave-One-Subject-Out Cross-Validation (LOSO-CV)**
-   - Training: Uses data from all subjects except one
-   - Testing: Evaluates on the held-out subject
-   - Repeats for each subject
-   - Better estimates real-world performance
-   - Prevents data leakage between subjects
-
-2. **Performance Metrics**
-   - Per-class precision, recall, and F1-score
-   - Confusion matrix for detailed error analysis
-   - Mean cross-validation accuracy across all subjects
-   - Feature importance visualization
+This project implements a machine learning pipeline for human activity recognition using the MotionSense dataset. The system uses accelerometer and gyroscope data to classify different activities like walking, jogging, sitting, etc.
 
 ## Project Structure
 
 ```
 ML-Assignment/
-├── data/                      # Data directory
-├── src/
-│   ├── data_loader.py        # Data loading and preprocessing
-│   ├── feature_extractor.py  # Feature extraction functions
-│   ├── model.py              # Model definition and training
-│   └── main.py              # Main execution script
-├── results/                  # Output directory for plots
-├── requirements.txt         # Dependencies
-└── README.md               # This file
+│
+├── src/                    # Source code
+│   ├── main.py            # Main script for training and evaluation
+│   ├── data_loader.py     # Data loading and preprocessing
+│   ├── feature_extractor.py # Feature extraction
+│   └── model.py           # Model implementation
+│
+├── motion-sense/          # Dataset directory
+│   └── data/             
+│       ├── B_Accelerometer_data.zip
+│       └── C_Gyroscope_data.zip
+│
+├── results/               # Results directory (created automatically)
+│   ├── base/             # Results for base model
+│   └── bayesian_opt/     # Results for optimized model
+│
+├── requirements.txt       # Project dependencies
+└── tuning-documentation.md # Detailed documentation of model tuning process
 ```
 
 ## Setup
 
-1. Install the required packages:
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd ML-Assignment
+```
+
+2. Install required dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Make sure the MotionSense dataset is in the `motion-sense` directory.
+3. Ensure the MotionSense dataset is in the correct location:
+- Place `B_Accelerometer_data.zip` and `C_Gyroscope_data.zip` in the `motion-sense/data/` directory
 
-## Running the Code
+## Model Training and Evaluation
 
-To train and evaluate the model:
+The project implements two versions of the Random Forest classifier:
 
+### 1. Base Model
+- Basic implementation with default parameters
+- Used as a baseline for performance comparison
+
+To run the base model:
 ```bash
-python src/main.py
+python src/main.py --results_subdir base
 ```
 
-This will:
-1. Load and preprocess the data
-2. Extract features from the sensor data
-3. Train and evaluate the model using LOSO-CV
-4. Generate performance plots in the `results` directory
+### 2. Optimized Model (Bayesian Optimization)
+- Uses Bayesian Optimization to find optimal hyperparameters
+- Optimizes the following parameters:
+  * n_estimators (range: 50-500)
+  * max_depth (range: 5-50)
+  * min_samples_split (range: 2-20)
+  * min_samples_leaf (range: 1-10)
+  * max_features (options: 'sqrt', 'log2')
 
-## Results
+To run the optimized model:
+```bash
+python src/main.py --results_subdir bayesian_opt
+```
 
-The results will be saved in the `results` directory:
-- `confusion_matrix.png`: Confusion matrix showing classification performance
-- `feature_importance.png`: Bar plot of the most important features
+## Pipeline Components
 
-The console will display:
-- Mean cross-validation accuracy
-- Detailed classification report with precision, recall, and F1-score for each activity
+### 1. Data Loading (`data_loader.py`)
+- Loads accelerometer and gyroscope data from zip files
+- Merges sensor data based on measurement IDs
+- Applies per-subject normalization
+- Handles data cleanup and temporary file management
 
-## Implementation Notes
+### 2. Feature Extraction (`feature_extractor.py`)
+- Implements sliding window approach
+- Extracts statistical features:
+  * Mean, standard deviation, min, max
+  * RMS (Root Mean Square)
+  * Signal Magnitude Area
+- Extracts spectral features using FFT
+- Handles data segmentation and labeling
 
-1. **Data Quality**
-   - Missing values are handled during data loading
-   - Timestamps are used to synchronize accelerometer and gyroscope data
-   - Majority voting is used for window labels
+### 3. Model Training and Evaluation (`main.py`)
+- Implements Leave-One-Subject-Out Cross-Validation (LOSO-CV)
+- Supports both base and optimized model training
+- Generates comprehensive evaluation metrics:
+  * Confusion matrix
+  * Classification report
+  * Per-subject performance metrics
+  * Cross-validation scores
 
-2. **Performance Considerations**
-   - Uses parallel processing for Random Forest training
-   - Efficient numpy operations for feature extraction
-   - Memory-efficient data loading with generators
+## Results Organization
 
-3. **Extensibility**
-   - Modular design allows easy addition of new features
-   - Can be extended to support different classifiers
-   - Configurable window size and stride 
+Each experiment's results are stored in a separate subdirectory under `results/`:
+
+### Base Model (`results/base/`)
+- Confusion matrix visualization
+- Performance metrics plots
+- Classification report
+- Detailed metrics in results.txt
+
+### Optimized Model (`results/bayesian_opt/`)
+- Same metrics as base model
+- Additional information:
+  * Best parameters found
+  * Optimization history
+  * Comparative performance metrics
+
+## Model Performance Metrics
+
+The evaluation includes:
+- Mean CV Accuracy
+- Macro F1-score
+- Per-class precision, recall, and F1-scores
+- Confusion matrix
+- Performance distribution across subjects
+
+## Tuning Process Documentation
+
+The model tuning process is documented in `tuning-documentation.md`, which includes:
+- Base model configuration and performance
+- Bayesian Optimization approach and rationale
+- Detailed results and analysis
+- Performance comparisons
+
+## Contributing
+
+To contribute to the project:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## License
+
+[Add your license information here] 
