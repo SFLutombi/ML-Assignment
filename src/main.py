@@ -11,7 +11,7 @@ import pandas as pd
 import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix, f1_score, accuracy_score
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import LeaveOneGroupOut, cross_val_score
+from sklearn.model_selection import LeaveOneGroupOut, cross_val_score, GroupShuffleSplit
 import argparse
 from skopt import BayesSearchCV
 from skopt.space import Real, Integer, Categorical
@@ -22,7 +22,7 @@ def setup_plotting_style():
     plt.rcParams['figure.figsize'] = [12, 8]
     plt.rcParams['font.size'] = 12
 
-def plot_confusion_matrix(y_true, y_pred, labels, save_path):
+def plot_confusion_matrix(y_true, y_pred, labels, save_path, title_suffix=""):
     """Plot and save confusion matrix."""
     plt.figure(figsize=(12, 10))
     cm = confusion_matrix(y_true, y_pred, labels=labels)
@@ -35,32 +35,32 @@ def plot_confusion_matrix(y_true, y_pred, labels, save_path):
                 xticklabels=labels, yticklabels=labels)
     plt.xlabel("Predicted")
     plt.ylabel("True")
-    plt.title("Confusion Matrix (LOSO-CV)")
+    plt.title(f"Confusion Matrix {title_suffix}")
     
     # Save plot
     plt.tight_layout()
-    plt.savefig(save_path / 'confusion_matrix.png')
+    plt.savefig(save_path / f'confusion_matrix{title_suffix.lower().replace(" ", "_")}.png')
     plt.close()
 
-def plot_performance_metrics(accuracies, f1_scores, save_path):
+def plot_performance_metrics(accuracies, f1_scores, save_path, title_suffix=""):
     """Plot performance metrics across folds."""
     plt.figure(figsize=(15, 6))
     
     # Plot accuracies
     plt.subplot(1, 2, 1)
     plt.boxplot(accuracies)
-    plt.title('Accuracy Distribution Across Subjects')
+    plt.title(f'Accuracy Distribution {title_suffix}')
     plt.ylabel('Accuracy')
     
     # Plot F1 scores
     plt.subplot(1, 2, 2)
     plt.boxplot(f1_scores)
-    plt.title('F1-Score Distribution Across Subjects')
+    plt.title(f'F1-Score Distribution {title_suffix}')
     plt.ylabel('Macro F1-Score')
     
     # Save plot
     plt.tight_layout()
-    plt.savefig(save_path / 'performance_metrics.png')
+    plt.savefig(save_path / f'performance_metrics{title_suffix.lower().replace(" ", "_")}.png')
     plt.close()
 
 def save_results_to_file(results_dict, save_path):
@@ -106,9 +106,57 @@ def get_model(model_type='rf', **kwargs):
     # Add more models here as needed
     raise ValueError(f"Unknown model_type: {model_type}")
 
+def evaluate_model(clf, X, y, groups, output_dir, title_suffix=""):
+    """Evaluate model using LOSO-CV and return results."""
+    logo = LeaveOneGroupOut()
+    
+    # Initialize metrics storage
+    accuracies = []
+    f1_scores = []
+    all_y_true = []
+    all_y_pred = []
+    
+    # Perform LOSO-CV
+    for train_idx, test_idx in logo.split(X, y, groups=groups):
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+        
+        # Train and predict
+        clf.fit(X_train, y_train)
+        y_pred = clf.predict(X_test)
+        
+        # Store metrics
+        accuracies.append(accuracy_score(y_test, y_pred))
+        f1_scores.append(f1_score(y_test, y_pred, average='macro'))
+        
+        # Store predictions for confusion matrix
+        all_y_true.extend(y_test)
+        all_y_pred.extend(y_pred)
+    
+    # Calculate results
+    mean_cv_accuracy = np.mean(accuracies)
+    mean_cv_f1 = np.mean(f1_scores)
+    
+    # Generate plots
+    labels = sorted(np.unique(y))
+    plot_confusion_matrix(all_y_true, all_y_pred, labels, output_dir, title_suffix)
+    plot_performance_metrics(accuracies, f1_scores, output_dir, title_suffix)
+    
+    # Prepare results dictionary
+    results = {
+        'Mean CV Accuracy': mean_cv_accuracy,
+        'Mean CV F1-Score': mean_cv_f1,
+        'Individual Fold Accuracies': accuracies,
+        'Individual Fold F1-Scores': f1_scores,
+        'Classification Report': classification_report(all_y_true, all_y_pred)
+    }
+    
+    return results, clf
+
 def main():
     parser = argparse.ArgumentParser(description='HAR Model Training and Evaluation')
     parser.add_argument('--results_subdir', type=str, default='base', help='Subfolder for results (e.g., base, bayesian_opt)')
+    parser.add_argument('--test_size', type=float, default=0.2, help='Proportion of subjects to hold out for testing')
     args = parser.parse_args()
 
     try:
@@ -143,80 +191,75 @@ def main():
         print(f"Number of unique activities: {len(np.unique(y))}")
         print(f"Number of subjects: {len(np.unique(groups))}")
 
+        # Split subjects into train and test
+        gss = GroupShuffleSplit(n_splits=1, test_size=args.test_size, random_state=42)
+        train_idx, test_idx = next(gss.split(X, y, groups=groups))
+        
+        # Split the data
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+        groups_train, groups_test = groups[train_idx], groups[test_idx]
+
+        print(f"\nSplit data into:")
+        print(f"Training: {len(np.unique(groups_train))} subjects")
+        print(f"Testing:  {len(np.unique(groups_test))} subjects")
+
         print("\n3. Training and evaluating model...")
-        # Train and evaluate model
-        logo = LeaveOneGroupOut()
+        # Get model
         clf = get_model('rf', results_subdir=args.results_subdir)
         
-        # Initialize metrics storage
-        accuracies = []
-        f1_scores = []
-        all_y_true = []
-        all_y_pred = []
+        # Perform cross-validation on training data
+        print("\nPerforming cross-validation on training data...")
+        cv_results, trained_clf = evaluate_model(
+            clf, X_train, y_train, groups_train, 
+            output_dir, 
+            title_suffix="(Cross-Validation)"
+        )
         
-        # Perform LOSO-CV
-        for train_idx, test_idx in logo.split(X, y, groups=groups):
-            X_train, X_test = X[train_idx], X[test_idx]
-            y_train, y_test = y[train_idx], y[test_idx]
-            
-            # Train and predict
-            if args.results_subdir == 'bayesian_opt':
-                # For Bayesian Optimization, we first find the best parameters
-                clf.fit(X_train, y_train)
-                print("\nBest parameters found:")
-                for param, value in clf.best_params_.items():
-                    print(f"{param}: {value}")
-                # Use the best estimator for prediction
-                y_pred = clf.best_estimator_.predict(X_test)
-            else:
-                # Regular training for base model
-                clf.fit(X_train, y_train)
-                y_pred = clf.predict(X_test)
-            
-            # Store metrics
-            accuracies.append(accuracy_score(y_test, y_pred))
-            f1_scores.append(f1_score(y_test, y_pred, average='macro'))
-            
-            # Store predictions for confusion matrix
-            all_y_true.extend(y_test)
-            all_y_pred.extend(y_pred)
-        
-        # Calculate and display results
-        print("\n4. Results:")
-        mean_cv_accuracy = np.mean(accuracies)
-        mean_cv_f1 = np.mean(f1_scores)
-        
-        print(f"Mean CV Accuracy: {mean_cv_accuracy:.4f}")
-        print(f"Individual fold scores: {[f'{score:.4f}' for score in accuracies]}\n")
-        
-        # Generate classification report
-        print("Classification Report:")
-        class_report = classification_report(all_y_true, all_y_pred)
-        print(class_report)
+        # If using Bayesian Optimization, get the best parameters
+        if args.results_subdir == 'bayesian_opt':
+            print("\nBest parameters found:")
+            for param, value in trained_clf.best_params_.items():
+                print(f"{param}: {value}")
+            # Use the best estimator for final testing
+            final_clf = trained_clf.best_estimator_
+        else:
+            final_clf = trained_clf
 
-        print("\n5. Generating plots...")
-        # Generate and save plots
+        # Evaluate on held-out test set
+        print("\nEvaluating on held-out test set...")
+        final_clf.fit(X_train, y_train)  # Retrain on full training data
+        y_pred = final_clf.predict(X_test)
+        
+        # Calculate test metrics
+        test_accuracy = accuracy_score(y_test, y_pred)
+        test_f1 = f1_score(y_test, y_pred, average='macro')
+        test_report = classification_report(y_test, y_pred)
+        
+        print(f"\nTest Set Results:")
+        print(f"Accuracy: {test_accuracy:.4f}")
+        print(f"Macro F1-Score: {test_f1:.4f}")
+        print("\nClassification Report:")
+        print(test_report)
+        
+        # Generate test set plots
         labels = sorted(np.unique(y))
+        plot_confusion_matrix(y_test, y_pred, labels, output_dir, title_suffix="(Test Set)")
         
-        # Plot confusion matrix
-        plot_confusion_matrix(all_y_true, all_y_pred, labels, output_dir)
-        
-        # Plot performance metrics
-        plot_performance_metrics(accuracies, f1_scores, output_dir)
-        
-        # Save numerical results
+        # Save all results
         results_dict = {
-            'Mean CV Accuracy': mean_cv_accuracy,
-            'Mean CV F1-Score': mean_cv_f1,
-            'Individual Fold Accuracies': accuracies,
-            'Individual Fold F1-Scores': f1_scores,
-            'Classification Report': class_report
+            'Cross-Validation Results': cv_results,
+            'Test Set Results': {
+                'Accuracy': test_accuracy,
+                'Macro F1-Score': test_f1,
+                'Classification Report': test_report
+            }
         }
         
-        # Add best parameters to results if using Bayesian Optimization
+        # Add best parameters if using Bayesian Optimization
         if args.results_subdir == 'bayesian_opt':
-            results_dict['Best Parameters'] = clf.best_params_
-            results_dict['Optimization History'] = str(clf.optimizer_results_[0])
+            results_dict['Best Parameters'] = trained_clf.best_params_
+            results_dict['Optimization History'] = str(trained_clf.optimizer_results_[0])
             
         save_results_to_file(results_dict, output_dir)
 

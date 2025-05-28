@@ -44,30 +44,37 @@ pip install -r requirements.txt
 
 ## Model Training and Evaluation
 
-The project implements two versions of the Random Forest classifier:
+The project implements a robust evaluation strategy using group holdout validation:
 
-### 1. Base Model
-- Basic implementation with default parameters
-- Used as a baseline for performance comparison
+1. **Data Splitting**:
+   - Subjects are randomly split into training (80%) and test (20%) sets
+   - This ensures complete separation of subjects between training and testing
+   - Test subjects are never seen during model development
 
-To run the base model:
+2. **Training Phase**:
+   - Cross-validation is performed on training subjects only
+   - For base model: Leave-One-Subject-Out CV
+   - For optimized model: Bayesian Optimization with internal CV
+
+3. **Final Evaluation**:
+   - Models are evaluated on the held-out test subjects
+   - Provides unbiased estimate of real-world performance
+
+### Running the Models
+
+#### Base Model
 ```bash
-python src/main.py --results_subdir base
+python src/main.py --results_subdir base [--test_size 0.2]
 ```
 
-### 2. Optimized Model (Bayesian Optimization)
-- Uses Bayesian Optimization to find optimal hyperparameters
-- Optimizes the following parameters:
-  * n_estimators (range: 50-500)
-  * max_depth (range: 5-50)
-  * min_samples_split (range: 2-20)
-  * min_samples_leaf (range: 1-10)
-  * max_features (options: 'sqrt', 'log2')
-
-To run the optimized model:
+#### Optimized Model (Bayesian Optimization)
 ```bash
-python src/main.py --results_subdir bayesian_opt
+python src/main.py --results_subdir bayesian_opt [--test_size 0.2]
 ```
+
+Parameters:
+- `--results_subdir`: Output directory for results
+- `--test_size`: Proportion of subjects to hold out (default: 0.2)
 
 ## Pipeline Components
 
@@ -87,10 +94,11 @@ python src/main.py --results_subdir bayesian_opt
 - Handles data segmentation and labeling
 
 ### 3. Model Training and Evaluation (`main.py`)
-- Implements Leave-One-Subject-Out Cross-Validation (LOSO-CV)
+- Implements group holdout validation
+- Performs Leave-One-Subject-Out CV on training data
 - Supports both base and optimized model training
 - Generates comprehensive evaluation metrics:
-  * Confusion matrix
+  * Confusion matrix (for both CV and test set)
   * Classification report
   * Per-subject performance metrics
   * Cross-validation scores
@@ -100,10 +108,14 @@ python src/main.py --results_subdir bayesian_opt
 Each experiment's results are stored in a separate subdirectory under `results/`:
 
 ### Base Model (`results/base/`)
-- Confusion matrix visualization
-- Performance metrics plots
-- Classification report
-- Detailed metrics in results.txt
+- Cross-validation results:
+  * Confusion matrix
+  * Performance metrics plots
+  * Classification report
+- Test set results:
+  * Confusion matrix
+  * Performance metrics
+  * Classification report
 
 ### Optimized Model (`results/bayesian_opt/`)
 - Same metrics as base model
@@ -115,11 +127,15 @@ Each experiment's results are stored in a separate subdirectory under `results/`
 ## Model Performance Metrics
 
 The evaluation includes:
-- Mean CV Accuracy
-- Macro F1-score
-- Per-class precision, recall, and F1-scores
-- Confusion matrix
-- Performance distribution across subjects
+- Cross-validation metrics:
+  * Mean CV Accuracy
+  * Macro F1-score
+  * Per-class metrics
+- Test set metrics:
+  * Final accuracy
+  * Final F1-score
+  * Confusion matrix
+  * Detailed classification report
 
 ## Tuning Process Documentation
 
