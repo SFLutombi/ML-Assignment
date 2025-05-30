@@ -12,6 +12,8 @@ import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix, f1_score, accuracy_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import LeaveOneGroupOut, cross_val_score, GroupShuffleSplit
+from sklearn.experimental import enable_halving_search_cv
+from sklearn.model_selection import HalvingGridSearchCV
 import argparse
 from skopt import BayesSearchCV
 from skopt.space import Real, Integer, Categorical
@@ -94,6 +96,30 @@ def get_model(model_type='rf', **kwargs):
                 cv=5,       # 5-fold CV for optimization
                 n_jobs=-1,  # Use all available cores
                 random_state=42
+            )
+            return optimizer
+        elif kwargs.get('results_subdir') == 'halving_grid':
+            # Define the parameter grid for HalvingGridSearchCV
+            param_grid = {
+                'n_estimators': [50, 100, 200, 300, 400, 500],
+                'max_depth': [5, 10, 20, 30, 40, 50],
+                'min_samples_split': [2, 5, 10, 15, 20],
+                'min_samples_leaf': [1, 2, 4, 6, 8, 10],
+                'max_features': ['sqrt', 'log2']
+            }
+            
+            # Create base estimator
+            base_rf = RandomForestClassifier(random_state=42)
+            
+            # Create HalvingGridSearchCV object
+            optimizer = HalvingGridSearchCV(
+                base_rf,
+                param_grid,
+                cv=5,           # 5-fold CV
+                factor=3,       # Reduction factor for iterations
+                n_jobs=-1,      # Use all available cores
+                random_state=42,
+                aggressive_elimination=True
             )
             return optimizer
         else:
@@ -223,6 +249,9 @@ def main():
                 print(f"{param}: {value}")
             # Use the best estimator for final testing
             final_clf = trained_clf.best_estimator_
+        elif args.results_subdir == 'halving_grid':
+            # Use the best estimator from HalvingGridSearchCV
+            final_clf = trained_clf.best_estimator_
         else:
             final_clf = trained_clf
 
@@ -256,8 +285,8 @@ def main():
             }
         }
         
-        # Add best parameters if using Bayesian Optimization
-        if args.results_subdir == 'bayesian_opt':
+        # Add best parameters if using Bayesian Optimization or HalvingGridSearchCV
+        if args.results_subdir == 'bayesian_opt' or args.results_subdir == 'halving_grid':
             results_dict['Best Parameters'] = trained_clf.best_params_
             results_dict['Optimization History'] = str(trained_clf.optimizer_results_[0])
             

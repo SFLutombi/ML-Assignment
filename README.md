@@ -72,8 +72,13 @@ python src/main.py --results_subdir base [--test_size 0.2]
 python src/main.py --results_subdir bayesian_opt [--test_size 0.2]
 ```
 
+#### Optimized Model (Successive Halving Grid Search)
+```bash
+python src/main.py --results_subdir halving_grid [--test_size 0.2]
+```
+
 Parameters:
-- `--results_subdir`: Output directory for results
+- `--results_subdir`: Output directory for results (options: base, bayesian_opt, halving_grid)
 - `--test_size`: Proportion of subjects to hold out (default: 0.2)
 
 ## Pipeline Components
@@ -123,6 +128,14 @@ Each experiment's results are stored in a separate subdirectory under `results/`
   * Best parameters found
   * Optimization history
   * Comparative performance metrics
+
+### Optimized Model (`results/halving_grid/`)
+- Same metrics as base model
+- Additional information:
+  * Best parameters found
+  * Optimization history
+  * Comparative performance metrics
+  * Successive halving iterations summary
 
 ## Model Performance Metrics
 
